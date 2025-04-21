@@ -19,7 +19,12 @@ Because it is 13 commands. The additional run time should be 13 * 70 = #910
 To check the output, you can either view the memory or the register content of the processor.
 To look at register content of the processor, go to scope, click on cpu1, and look in the objects tab and scroll to regfile
 
+![registers](example1REG.png)
+
+
 To look at memory, go to scope, click on L1, and look at the objects tab and open up mem.
+
+![memory](example1MEM.png)
 
 //regInit
 
