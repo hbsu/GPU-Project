@@ -8,15 +8,16 @@
 //LD  0111_REG_imm9 //load into reg from memory address
 //STR 1000_REG_REG_irrelevant //stores from reg to memory address in reg
 //LDR 1001_REG_REG_irrelevant //load into reg from memory address in reg
-//STI 1010_REG_imm9 //Store from register into PC + imm9
-//LDI 1011_REG_imm9 //Load into register from PC + imm9
+//STI 1010_REG_imm9 //Store from register into PC + imm9 **UNIMPLEMENTED
+//LDI 1011_REG_imm9 //Load into register from PC + imm9 **UNIMPLEMENTED
 //JMP 1100_REG_000000000 //Jump to address in register
 //RET 1101 //Jump to address in R7 (return register)
 //BRZ 1110_REG_imm9 //Jump to address at imm9 if REG is zero. 
 //BRN 1111_REG_imm9 //Jump to address at imm9 if REG is nonzero.
 //NOP 0000
 
-
+//This processor uses 4 bit opcode and 16 bit instructions. Can be edited 
+//if instruction length is changed or if memory addressing is changed
 `define ADD     4'b0001
 `define SUB     4'b0010
 `define MUL     4'b0011
@@ -27,8 +28,8 @@
 `define LD      4'b0111
 `define STR     4'b1000
 `define LDR     4'b1001
-`define STI     4'b1010
-`define LDI     4'b1011
+`define STI     4'b1010 //Unimplemented
+`define LDI     4'b1011 //Unimplemented
 `define JMP     4'b1100
 `define RET     4'b1101
 `define BRZ     4'b1110
@@ -86,11 +87,18 @@ module processor(
     
     
         case (state)
+			/**
+			FETCH CASE
+			Sets readMem high, so the processor flags for the instruction
+			at the specified memory address.
+			Because this is technically a "load", this instruction takes
+			two clock cycles, therefore WAIT_FOR_ISA is a stalling state.
+			*/
             FETCH: begin
-                memAddr <= pc;
-                readMem <= 1;
-                writeMem <= 0;
-                state <= WAIT_FOR_ISA;
+                memAddr <= pc; //Assigns internal PC as the current memAddr
+                readMem <= 1; //sets read flag high
+                writeMem <= 0; //make sure no write over read error
+                state <= WAIT_FOR_ISA; //next state
             
             end
             
@@ -98,6 +106,14 @@ module processor(
                 state <= DECODE; 
             end
             
+			
+			/**
+			Decodes instructions and assigns parts of the 16 bits to
+			different purposes. 
+			There is opcode for if the instruction is register-register
+			or register-immediate. All possible output/input regions are assigned
+			at once, and funneled through the ALU. 
+			*/
             DECODE: begin
                 instruction = memDataIn;    
                 opcode = instruction[15:12];
@@ -115,6 +131,14 @@ module processor(
                 state <= EXECUTE;
             end
                 
+				
+			/*
+			ALU stage, execute commands. 
+			ADD, SUB, MUL, AND, have different results based on if the command 
+			is register-register or register-immediate
+			If the operation is a control-commmand, the next state becomes writeback.
+			Otherwise, program moves on to memory access stage.
+			*/
             EXECUTE: 
                 begin //beginning of case statement
                     case (opcode)
@@ -188,6 +212,13 @@ module processor(
                         else 
                             state <= MEM;
                     end //end of case
+			
+			/*
+			Memory access stage. Load and stores are two cycle instructions 
+			so the processor adds another state and delay. This process may 
+			be concatonated. 
+			*/
+					
             MEM: begin
                 case(opcode)
                     `LD, `LDR: begin
@@ -199,7 +230,7 @@ module processor(
                     end
                     default: ;
                     endcase
-                state <= MEMDELAY;
+                state <= MEMDELAY; //Because load/store is a two-cycle process, we need a delay.
             end
             MEMDELAY: begin
                 case(opcode)
@@ -213,6 +244,14 @@ module processor(
                     endcase
                     state <= WB;
             end
+			
+			/*
+			Memory writeback. All internal affected registers are updated 
+			with the results from the calculation stage.
+			If the instruction was a control-commmand, 
+			the program counter is updated with the ALU result. 
+			Otherwise, program counter is regularly incremented. 
+			*/
             WB: begin
                 readMem <= 0;
                 writeMem <= 0;
@@ -243,8 +282,11 @@ module processor(
         
 endmodule
 
-
-//Test memory module. 256 lines of memory with 16 bit line length. WE allows a write, RE allows a read. Outputs undefined if neither is specified. 
+/*
+Test memory module. 256 lines of memory with 16 bit line length. 
+WE allows a write, RE allows a read. 
+Outputs undefined if neither is specified. 
+*/
 module test_memory (
     input wire clk,
     input wire we,                 // Write enable
