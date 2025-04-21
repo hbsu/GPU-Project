@@ -1,20 +1,20 @@
 Sample run:
-AND R0, R0, #0;
-AND R1, R1, #0;
-AND R2, R2, #0;
-AND R3, R3, #0;
-AND R4, R4, #0;
-AND R5, R5, #0;
-AND R6, R6, #0;
-AND R7, R7, #0; //Initialize registers
-ADD R1, R1, #5; //put 5 into register 1
-ADD R2, R2, #5; //put 5 into register 2
-ADD R3, R1, R2; //Add 5 + 5 into R3
-ST R4, #8; //Store the contents of 0x11 into register 4
+AND R0, R0, #0; \n
+AND R1, R1, #0; \n
+AND R2, R2, #0; \n
+AND R3, R3, #0; \n
+AND R4, R4, #0; \n
+AND R5, R5, #0; \n
+AND R6, R6, #0; \n
+AND R7, R7, #0; //Initialize registers \n
+ADD R1, R1, #5; //put 5 into register 1 \n
+ADD R2, R2, #5; //put 5 into register 2 \n
+ADD R3, R1, R2; //Add 5 + 5 into R3 \n
+ST R4, #8; //Store the contents of 0x11 into register 4 \n
 
 
 Copy and paste the below code into the preload section of the testbench.
-Because it is 13 commands. The additional run time should be 13 * 70 = #910
+Because it is 13 commands. The additional run time should be 13 * 70 = #910 \n
 
 To check the output, you can either view the memory or the register content of the processor.
 To look at register content of the processor, go to scope, click on cpu1, and look in the objects tab and scroll to regfile
