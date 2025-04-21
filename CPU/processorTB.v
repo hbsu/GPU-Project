@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 
-
+//Testbench for processor commands
+//Example run will be shown. 
 module processorTB(
     );
     
@@ -21,152 +22,69 @@ module processorTB(
     always #5 clock = ~clock; // 100 MHz clock
     
     test_memory L1( //Main memory rn
-        .clk(clock),
-        .we(mem_we),
-        .re(readFlag),
-        .addr(memory_address),
-        .din(testData),
-        .dout(memDataIn)
+        .clk(clock), //Clock cycle
+        .we(mem_we), //write enable
+        .re(readFlag), //read enable
+        .addr(memory_address), //Specify where in memory you want to write/read
+        .din(testData), //Data to be put into memory, will only update if write enable is high
+        .dout(memDataIn) //Read data value at specified memory location
     );
     
     processor cpu1(
-    .clock(clock), 
-    .reset(reset), 
-    .currPc(nextProgramCounter), //
-    .memDataIn(memDataIn), //input data
-    .dataOut(resultData), //output
+    .clock(clock), //Clock
+    .reset(reset), //Reset
+    .currPc(nextProgramCounter), //NOT NECESSARY PORT
+    .memDataIn(memDataIn), //input data, 16 bits, could be instruction or memory contents
+    .dataOut(resultData), //output data, used for ST/STR
     .memAddr(tempAddress), //output address to be used in read or write or computation
-    .readMem(readFlag), //output for read flag
-    .writeMem(writeFlag), //output for write flag
-    .nextPc(nextProgramCounter) //output for next program counter. Unused currently
+    .readMem(readFlag), //output for read flag, turns on or off read enable
+    .writeMem(writeFlag), //output for write flag, turns on or off write enable
+    .nextPc(nextProgramCounter) //NOT A NECESSARY PORT
     );
     
-    wire[7:0] memory_address;
-    wire mem_we;
-    wire[15:0] testData;
-    reg preload_we = 0;
-    reg[7:0] preload_addr = 0;
-    reg[15:0] preload_data = 0;
+    wire[7:0] memory_address; //8 bit memory address
+    wire mem_we; //write enable
+    wire[15:0] testData; //test data
+	
+	
+	
+	//The 3 nets below are for loading memory with data such as instructions.
+	//when preload_we is high, assume CPU is in boot up. 
+    reg preload_we = 0; //preload write enable, allows you to load data into memory
+    reg[7:0] preload_addr = 0; //Preload address for where to assign a specific line
+    reg[15:0] preload_data = 0; //Used to assign data in memory
     
-    assign mem_we = preload_we | writeFlag;
-    assign memory_address  = preload_we ? preload_addr : tempAddress;
+    assign mem_we = preload_we | writeFlag; //control statement
+	//If preload_we is high, use the preload instructions, otherwise use the outputs of the CPU
+    assign memory_address  = preload_we ? preload_addr : tempAddress; 
     assign testData = preload_we ? preload_data : resultData; 
     
     initial begin 
-    
+    //TO USE THE TESTBENCH
         
-        
-        reset = 1;
+        //*****DO NOT REMOVE BELOW THIS LINE
+        reset = 1; //Puts CPU in reset
         #20;
         reset = 0;
         //BOOTLOADER
         preload_we = 1; //STORE TESTBENCH BELOW THIS LINE
-       
-// AND R0, R0, #0
-preload_addr = 8'h00;
-preload_data = 16'b0100000000000000; // AND R0, R0, #0
-#10;
-
-// AND R1, R1, #0
-preload_addr = 8'h01;
-preload_data = 16'b0100000100100000; // AND R1, R1, #0
-#10;
-
-// AND R2, R2, #0
-preload_addr = 8'h02;
-preload_data = 16'b0100001001000000; // AND R2, R2, #0
-#10;
-
-// AND R3, R3, #0
-preload_addr = 8'h03;
-preload_data = 16'b0100001101100000; // AND R3, R3, #0
-#10;
-
-// AND R4, R4, #0
-preload_addr = 8'h04;
-preload_data = 16'b0100010010000000; // AND R4, R4, #0
-#10;
-
-// AND R5, R5, #0
-preload_addr = 8'h05;
-preload_data = 16'b0100010110100000; // AND R5, R5, #0
-#10;
-
-// AAND R6, R6, #0
-preload_addr = 8'h06;
-preload_data = 16'b0100011011000000; // AND R6, R6, #0
-#10;
-
-// AND R7, R7, #0
-preload_addr = 8'h07;
-preload_data = 16'b0100011111100000; // AND R7, R7, #0
-#10;
-
-//ADD R1, R1, #3
-
-preload_addr = 8'h08;
-preload_data = 16'b0001000100100011; // ADD R1, R1, #3
-#10;
-
-//ADD R2, R2, #2
-
-preload_addr = 8'h09;
-preload_data = 16'b0001001001000010; // ADD R2, R2, #2
-#10;
-
-//ADD R3, R1, R2
-
-preload_addr = 8'h0A;
-preload_data = 16'b0001101100101000; // ADD R3, R1, R2
-#10;
-
-//ST R3, #10
-
-preload_addr = 8'h0B;
-preload_data = 16'b0110011000001010; // ST R3, #10
-#10;
-
-//LD R4, #10
-
-preload_addr = 8'h0C;
-preload_data = 16'b0111100000001010; // LD R4, #10
-#10;
-
-//SUB R5, R5, R3
-
-preload_addr = 8'h0D;
-preload_data = 16'b0010110101101100; // SUB R5, R3, R3
-#10;
-
-//BRZ R5, #2
-
-preload_addr = 8'h0E;
-preload_data = 16'b1110101000000010; // BRZ R5, #2
-#10;
-
-//ADD R4, R4, #99
-
-preload_addr = 8'h0F;
-preload_data = 16'b0001010010000011; // ADD R4, R4, #99
-#10;
-
-//ADD R6, R6, #1
-
-preload_addr = 8'h10;
-preload_data = 16'b0001011011000001; // ADD R6, R6, #1
-#10;
+		//*****DO NOT REMOVE ABOVE THIS LINE
+		
+		//PUT TESTBENCH STARTING THIS LINE:
 
         
+		//*****DO NOT REMOVE BELOW THIS LINE
         preload_we = 0; //STORE TESTBENCH ABOVE THIS LINIE
-        
         #10;
-        reset = 1;
-        
+        reset = 1; //Puts CPU back in reset
         #70;
         reset = 0;
+		//*****DO NOT REMOVE ABOVE THIS LINE
+
         
-        #1750; //Multiply this by amount of commands
-        
+        #100; //Allow time for commmands to pass. 
+            //Each instruction takes at most 7 clock cycles,
+            //so Run the testbench for #(70 * instruction count)        
         
                
         $finish;
