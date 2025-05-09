@@ -76,7 +76,7 @@ module cpuStructSim(
 	reg[2:0] 	ID_EX_RFwriteAddress;
 	//control signals
 	reg 		ID_EX_isBranch, ID_EX_isJump, ID_EX_aluSrcA, ID_EX_aluSrcB, 
-	ID_EX_dataMemRead, ID_EX_dataMemWrite, ID_EX_regWrite, 
+	ID_EX_dataMemRead, ID_EX_dataMemWrite, ID_EX_regWrite, ID_EX_immType 
 	ID_EX_compOrLoad;
 	//aluSrcB is ROI aluSrcA is LDorST, 1 for using regfile stuff, 0 for using other. 
 	reg[3:0] 	ID_EX_aluOP;
@@ -91,7 +91,7 @@ module cpuStructSim(
 	reg[2:0] 	MEM_WB_RFwriteAddress;
 	reg 		MEM_WB_regWrite, MEM_WB_compOrLoad;
 	//Now we need control signals for all the data.
-	wire 		isBranch, isJump, aluSrcA, aluSrcB, dataMemRead, dataMemWrite, regWrite, compOrLoad;
+	wire 		isBranch, isJump, aluSrcA, aluSrcB, dataMemRead, dataMemWrite, regWrite, compOrLoad, immType;
 	wire 		IFIDwrite, IDEXwrite; 	//Control signals to say whether or not to start the next pipeline stage. 
 										// This is because memory retrieve and register file access are 1 cycle long
 	wire[3:0] 	aluOP;
@@ -115,11 +115,25 @@ module cpuStructSim(
 	adder_8b	BRANCHADDER(.in1(PC), 	.in2(instrData_in[7:0]), .adderout(/*implement later*/));
 	alu 		ALU(.in1(aluIn1), .in2(aluIn2b), .aluFunc(ID_EX_aluOP), .aluResult(aluResult));
 	//Need Muxes for lots of stuff, right now MUXES for combinational logic.
+	// mux3b 		resReg(IF_ID_INST[11:9], IF_ID_INST[10:8], ID_EX_aluSrcA, ID_EX_RFwriteAddress);
+	// mux3b		regA(IF_ID_INST[11:9], IF_ID_INST[10:8], ID_EX_aluSrcA, ID_EX_RFreadReg1);
+	// mux3b		regB();
 	mux16b 		alusrcA(.in1({{8{ID_EX_PC[7]}}, ID_EX_PC}) , .in2(ID_EX_RFread1), .control(ID_EX_aluSrcA), .out(aluIn1));//sign extend PC
-	mux16b		alusrcB1(.in1(ID_EX_Sext5), .in2(ID_EX_RFread2), .control(ID_EX_aluSrcB), .out(aluIn2a));
-	mux16b		alusrcB2(.in1(ID_EX_Sext9), .in2(aluIn2a), .control(ID_EX_aluSrcB), .out(aluIn2b));
+	//If aluSrcB is immediate, use the immediate. It should stay imm5 or RFread2 UNLESS aluSrcA (Ld or Store instruction) is low.
+	mux16b		alusrcB1(.in1(aluIn2a), .in2(ID_EX_RFread2), .control(ID_EX_aluSrcB), .out(aluIn2b));
+	mux16b		alusrcB2(.in1(ID_EX_Sext9), .in2(ID_EX_Sext5), .control(ID_EX_immType), .out(aluIn2a));
 	//If compOrLoad is zero, use data from memory, otherwise use the alu result, MEM_WB_dataToWriteback is the data which will be written into the regFile
 	mux16b 		wb_data_sel(.in1(MEM_WB_dataFromMem), .in2(MEM_WB_aluResult), .control(MEM_WB_compOrLoad), .out(MEM_WB_dataToWriteback)); 
+	
+	controller 	c1(
+		.IF_ID_Inst(IF_ID_Inst), .isBranch(isBranch), .isJump(isJump), 
+		.aluSrcA(aluSrcA),.aluSrcB(aluSrcB), 
+		.dataMemRead(dataMemRead), .dataMemWrite(dataMemWrite), 
+		.regWrite(regWrite), 
+		.compOrLoad(compOrLoad),.immType(immType),
+		.aluOP(aluOP),.RFwriteAddress(RFwriteAddress)
+	);
+	
 	
 	//Reset Protocol
 	always @(posedge clock) begin
@@ -129,6 +143,20 @@ module cpuStructSim(
 		else begin
 			PC <= nextPC;
 		end
+	end
+	
+	//right now just do arithmatic stuff
+	always @(*) begin
+		if(IF_ID_Inst[15:12] == `ADD || IF_ID_Inst[15:12] == `SUB || IF_ID_Inst[15:12] == `MUL || 
+		IF_ID_Inst[15:12] == `AND || IF_ID_Inst[15:12] == `NOT) begin
+			RFreadReg1 = IF_ID_Inst[7:5];
+			RFreadReg2 = IF_ID_Inst[4:2];
+		end else begin
+			RFreadReg1 = IF_ID_Inst[11:9]; //TEMPORARY
+			RFreadReg2 = IF_ID_Inst[11:9];//TEMPORARY
+		end
+		
+		
 	end
 	
 	always @(posedge clock) begin
@@ -154,6 +182,7 @@ module cpuStructSim(
 		ID_EX_regWrite 			<= regWrite;
 		ID_EX_compOrLoad		<= compOrLoad;
 		ID_EX_aluOP 			<= aluOP;
+		ID_EX_immType 			<= immType;
 		
 		
 		//EX/Mem Stage EXECUTE STAGE
@@ -173,9 +202,7 @@ module cpuStructSim(
 		MEM_WB_RFwriteAddress 	<= 	EX_MEM_RFwriteAddress;
 		MEM_WB_regWrite 		<=	EX_MEM_regWrite;
 		MEM_WB_compOrLoad 		<= 	EX_MEM_compOrLoad;
-	
-	
-	
+
 	
 	end
 endmodule
