@@ -102,7 +102,7 @@ void assemble(char *line, int addr) {
         reg_to_binstr(reg_to_int(r2), regB);
         strcat(binary, regA);
         strcat(binary, regB);
-        strcat(binary, "00000");
+        strcat(binary, "000000");
 
     } else if (strcmp(op, "JMP") == 0) {
         strcat(binary, "1100000");
