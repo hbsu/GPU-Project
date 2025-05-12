@@ -165,7 +165,7 @@ module hazardDetector(
 	input wire[2:0] ID_EX_RFWriteAddress,
 	EX_MEM_RFWriteAddress, MEM2_WB_RFWriteAddress, MEM_WB_RFWriteAddress,
 	input wire ID_EX_regWrite, EX_MEM_regWrite, MEM2_WB_regWrite, MEM_WB_regWrite,
-	input wire EX_MEM_isLoad,
+	input wire ID_EX_isLoad,
 	output reg stall, newWriteIncoming,
 	output reg[1:0]forwardA, forwardB
 );
@@ -178,8 +178,10 @@ module hazardDetector(
 		case(instruction[15:12])
 			`ADD, `SUB, `AND, `MUL, `NOT: begin //addx_1_reg_reg_reg or addx_0_reg_reg_imm5
 				//check if register 1 can be forwarded
-				if((EX_MEM_RFWriteAddress == instruction[7:5]) && EX_MEM_regWrite) begin 
-					if(EX_MEM_isLoad) begin
+				
+				
+				if((ID_EX_RFWriteAddress == instruction[7:5]) && ID_EX_regWrite) begin 
+					if(ID_EX_isLoad) begin
 						stall = 1'b1;
 						forwardA = 2'b00;
 					end else begin
@@ -187,11 +189,11 @@ module hazardDetector(
 						forwardA = 2'b01;
 					end
 					end
-				else if((MEM2_WB_RFWriteAddress == instruction[7:5]) && MEM2_WB_regWrite) begin 
+				else if((EX_MEM_RFWriteAddress == instruction[7:5]) && EX_MEM_regWrite) begin 
 					stall = 1'b0;
 					forwardA = 2'b10;
 					end
-				else if((MEM_WB_RFWriteAddress == instruction[7:5]) && MEM_WB_regWrite) 
+				else if((MEM2_WB_RFWriteAddress == instruction[7:5]) && MEM2_WB_regWrite) 
 					begin
 					stall = 1'b0;
 					forwardA = 2'b11;
@@ -203,9 +205,9 @@ module hazardDetector(
 			
 				case(instruction[11]) //check if it is register or immediate
 					1'b1: begin //Check if register 2 can be forwarded
-						if((EX_MEM_RFWriteAddress == instruction[4:2]) && EX_MEM_regWrite) 
+						if((ID_EX_RFWriteAddress == instruction[4:2]) && ID_EX_regWrite) 
 						begin 
-							if(EX_MEM_isLoad) begin
+							if(ID_EX_isLoad) begin
 						stall = 1'b1;
 						forwardB = 2'b00;
 					end else begin
@@ -213,12 +215,12 @@ module hazardDetector(
 						forwardB = 2'b01;
 					end
 					end
-						else if((MEM2_WB_RFWriteAddress == instruction[4:2]) && MEM2_WB_regWrite) 
+						else if((EX_MEM_RFWriteAddress == instruction[4:2]) && EX_MEM_regWrite) 
 						begin						
 							stall = 1'b0;
 							forwardB = 2'b10;
 							end
-						else if((MEM_WB_RFWriteAddress == instruction[4:2]) && MEM_WB_regWrite) 
+						else if((MEM2_WB_RFWriteAddress == instruction[4:2]) && MEM2_WB_regWrite) 
 						begin
 							stall = 1'b0;
 							forwardB = 2'b11;
@@ -232,8 +234,8 @@ module hazardDetector(
 				endcase
 				end
 			`ST: begin //stxx_reg_imm, also checks if register 1 can be forwarded
-				if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
-					if(EX_MEM_isLoad) begin
+				if((ID_EX_RFWriteAddress == instruction[11:9]) && ID_EX_regWrite) begin 
+					if(ID_EX_isLoad) begin
 						stall = 1'b1;
 						forwardA = 2'b00;
 					end else begin
@@ -241,11 +243,11 @@ module hazardDetector(
 						forwardA = 2'b01;
 					end
 					end
-				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) begin 
+				else if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
 					stall = 1'b0;
 					forwardA = 2'b10;
 					end
-				else if((MEM_WB_RFWriteAddress == instruction[11:9]) && MEM_WB_regWrite) 
+				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) 
 					begin
 					stall = 1'b0;
 					forwardA = 2'b11;
@@ -256,8 +258,8 @@ module hazardDetector(
 				end
 				end
 			`STR: begin //strx_reg_reg_xxxxxx, checks if both register 1 and 2 can be forwarded
-				if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
-					if(EX_MEM_isLoad) begin
+				if((ID_EX_RFWriteAddress == instruction[11:9]) && ID_EX_regWrite) begin 
+					if(ID_EX_isLoad) begin
 						stall = 1'b1;
 						forwardA = 2'b00;
 					end else begin
@@ -265,11 +267,11 @@ module hazardDetector(
 						forwardA = 2'b01;
 					end
 					end
-				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) begin 
+				else if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
 					stall = 1'b0;
 					forwardA = 2'b10;
 					end
-				else if((MEM_WB_RFWriteAddress == instruction[11:9]) && MEM_WB_regWrite) 
+				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) 
 					begin
 					stall = 1'b0;
 					forwardA = 2'b11;
@@ -278,15 +280,15 @@ module hazardDetector(
 					forwardA = 2'b00;
 					stall = 1'b0;
 				end
-				if((EX_MEM_RFWriteAddress == instruction[8:6]) && EX_MEM_regWrite) begin 
+				if((ID_EX_RFWriteAddress == instruction[8:6]) && ID_EX_regWrite) begin 
 					stall = 1'b0;
 					forwardB = 2'b01;
 					end
-				else if((MEM2_WB_RFWriteAddress == instruction[8:6]) && MEM2_WB_regWrite) begin 
+				else if((EX_MEM_RFWriteAddress == instruction[8:6]) && EX_MEM_regWrite) begin 
 					stall = 1'b0;
 					forwardB = 2'b10;
 					end
-				else if((MEM_WB_RFWriteAddress == instruction[8:6]) && MEM_WB_regWrite) 
+				else if((MEM2_WB_RFWriteAddress == instruction[8:6]) && MEM2_WB_regWrite) 
 					begin
 					stall = 1'b0;
 					forwardB = 2'b11;
@@ -297,8 +299,8 @@ module hazardDetector(
 				end
 				end
 			`BRZ, `BRN: begin //BRZx_REG, BRNx_REG
-				if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
-					if(EX_MEM_isLoad) begin
+				if((ID_EX_RFWriteAddress == instruction[11:9]) && ID_EX_regWrite) begin 
+					if(ID_EX_isLoad) begin
 						stall = 1'b1;
 						forwardA <= 2'b00;
 					end else begin
@@ -306,11 +308,11 @@ module hazardDetector(
 						forwardA = 2'b01;
 					end
 					end
-				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) begin 
+				else if((EX_MEM_RFWriteAddress == instruction[11:9]) && EX_MEM_regWrite) begin 
 					stall = 1'b0;
 					forwardA = 2'b10;
 					end
-				else if((MEM_WB_RFWriteAddress == instruction[11:9]) && MEM_WB_regWrite) 
+				else if((MEM2_WB_RFWriteAddress == instruction[11:9]) && MEM2_WB_regWrite) 
 					begin
 					stall = 1'b0;
 					forwardA = 2'b11;
