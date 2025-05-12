@@ -11,8 +11,8 @@
 //NOT 0101_X_REG_REG //First reg is result reg, second reg is input reg
 
 //Load Store type instructiosn
-//ST  0110_REG_imm9 //store from reg into memory address
-//LD  0111_REG_imm9 //load into reg from memory address
+//ST  0110_REG_imm9 //store from reg from pc + 1 + imm9  memory address
+//LD  0111_REG_imm9 //load into reg from pc + 1 + imm9 memory address
 //STR 1000_REG_REG_irrelevant //stores from reg to memory address in reg
 //LDR 1001_REG_REG_irrelevant //load into reg from memory address in reg
 //STI 1010_REG_imm9 //Store from register into PC + imm9 **UNIMPLEMENTED
@@ -61,7 +61,9 @@ module cpuStructSim(
 	output ramReadM,
 	output ramWriteM,
 	output[7:0] ramAddress,
-	output wire[15:0] ramData_out
+	output wire[15:0] ramData_out,
+	
+	output wire noCommandLeft
 
     );
 	//Program Counter Related
@@ -85,28 +87,32 @@ module cpuStructSim(
 	ID_EX_compOrLoad, ID_EX_regAddressing, ID_EX_isLoad;
 	//aluSrcB is ROI aluSrcA is LDorST, 1 for using regfile stuff, 0 for using other. 
 	reg[3:0] 	ID_EX_aluOP;
+	reg[1:0]       ID_EX_forwardA, ID_EX_forwardB;
 	//EX/MEM pipeline Registers
 	reg[15:0] 	EX_MEM_aluResult, EX_MEM_dataOut, EX_MEM_RFread2, EX_MEM_dataFromMem;
-	reg[7:0] 	EX_MEM_PC, EX_MEM_nextPC;
+	reg[7:0] 	EX_MEM_PC, EX_MEM_nextPC, EX_MEM_ramAddress;
 	reg[2:0] 	EX_MEM_RFwriteAddress;
 	reg 		EX_MEM_dataMemRead, EX_MEM_dataMemWrite, EX_MEM_regWrite, EX_MEM_isLoad; //keep some control signals from ID/EX stage
 	reg 		EX_MEM_compOrLoad, EX_MEM_regAddressing; //control signal for if result is computational or a load, so use aluResult or datafromMem
+	reg            prev_MEM2_WB_compOrLoad;
 	//ADD NEW PIPELINE REGISTER BETWEEN MEM AND WB
 	reg[7:0] 	MEM2_WB_PC;
 	reg[15:0] 	MEM2_WB_dataFromMem, MEM2_WB_aluResult;
 	reg[2:0] 	MEM2_WB_RFwriteAddress;
 	reg			MEM2_WB_regWrite, MEM2_WB_compOrLoad;
+	reg        MEM2_WB_isLoad;
 	
 	//MEM/WB pipeline registers
 	reg[15:0] 	MEM_WB_dataToWriteback, MEM_WB_aluResult, MEM_WB_dataFromMem;
 	reg[7:0] 	MEM_WB_PC;
 	reg[2:0] 	MEM_WB_RFwriteAddress;
-	reg 		MEM_WB_regWrite, MEM_WB_compOrLoad;
+	reg 		MEM_WB_regWrite, MEM_WB_compOrLoad, MEM_WB_isLoad;
 	//Now we need control signals for all the data.
 	wire 		isBranch, isJump, aluSrcA, aluSrcB, dataMemRead, dataMemWrite, regWrite, compOrLoad, immType, regAddressing, isLoad;
 	wire 		IFIDwrite, IDEXwrite; 	//Control signals to say whether or not to start the next pipeline stage. 
 										// This is because memory retrieve and register file access are 1 cycle long
 	wire[3:0] 	aluOP;
+	wire[7:0]   to_ramAddress;
 	//regFile
 	wire[15:0] 	RFdata1, RFdata2;
 	wire[2:0] 	RFwriteAddress;
@@ -120,6 +126,8 @@ module cpuStructSim(
 	
 	//wait for load delay
 	wire loading_data, executeStall, branchTaken;
+	
+    reg[2:0] EX_MEM_aluOP, MEM2_WB_aluOP, MEM_WB_aluOP;  
 	reg stallInserted; //testbench only
 	
 	//for data forwarding
@@ -127,161 +135,173 @@ module cpuStructSim(
 	wire final_regWrite;
 	wire[1:0] forwardA, forwardB;
 	wire[15:0] forwardedA, forwardedB; //used to go into the muxes which choose pc/immediate or reg type
+	wire whichcompOrLoad;
+	reg[7:0]    internalPC;
 	
-	registerFile 	regFile(
-							.writeReg(MEM_WB_RFwriteAddress), .readReg1(RFreadReg1), .readReg2(RFreadReg2),
-							.writeData(MEM_WB_dataToWriteback), .clock(clock), .regWriteEnable(final_regWrite), .reset(reset), 
-							.readData1(RFdata1), .readData2(RFdata2)
-							);
-							
+	registerFile       regFile(
+                                .writeReg(MEM_WB_RFwriteAddress), .readReg1(RFreadReg1), .readReg2(RFreadReg2),
+                                .writeData(wb_mux_out), .clock(clock), .regWriteEnable(final_regWrite), .reset(reset), 
+                                .readData1(RFdata1), .readData2(RFdata2)
+							);		
 	//PC adder below
-	adder_8b	PCADDER(.in1(8'b01),  .in2(PC), .adderout(nextPC));
-	adder_8b	BRANCHADDER(.in1(PC), 	.in2(ID_EX_sext9[7:0]), .adderout(branchTarget));
+	adder_8b           PCADDER(
+	                           .in1(8'b01),  .in2(PC), .adderout(nextPC));
+	adder_8b           BRANCHADDER(.in1(PC), 	.in2(ID_EX_sext9[7:0]), .adderout(branchTarget));
 	//00 is sequential, 01 is branch, 10 is jump, 11 is return
 	//it should go nextPC, branchTarget from ALU, 
-	mux16b41 pcSelmux(.in1(nextPC), .in2(branchTarget), .in3(forwardA), .in4(forwardA), .control(pcSel), .out(pcSrc)); //MUX for selecting what to use as the PC source
+	mux16b41           pcSelmux(.in1(nextPC), .in2(branchTarget), .in3(forwardedA), .in4(forwardedA), .control(pcSel), .out(pcSrc)); //MUX for selecting what to use as the PC source
 	//forward data muxes.
-	mux16b41	aluin1(.in1(ID_EX_RFread1), .in2(EX_MEM_aluResult), .in3(MEM2_WB_aluResult), .in4(MEM_WB_aluResult), .control(forwardA), .out(forwardedA));
-	mux16b41 	aluin2(.in1(ID_EX_RFread2), .in2(EX_MEM_aluResult), .in3(MEM2_WB_aluResult), .in4(MEM_WB_aluResult), .control(forwardB), .out(forwardedB));
+	mux16b41           aluin1(.in1(ID_EX_RFread1), .in2(EX_MEM_aluResult), .in3(MEM2_WB_aluResult), .in4(MEM_WB_aluResult), .control(ID_EX_forwardA), .out(forwardedA));
+	mux16b41           aluin2(.in1(ID_EX_RFread2), .in2(EX_MEM_aluResult), .in3(MEM2_WB_aluResult), .in4(MEM_WB_aluResult), .control(ID_EX_forwardB), .out(forwardedB));
 	
-	alu 		ALU(.in1(aluIn1), .in2(aluIn2b), .aluFunc(ID_EX_aluOP), .aluResult(aluResult));
-	mux16b 		alusrcA(.in1({{8{ID_EX_PC[7]}}, ID_EX_PC}) , .in2(forwardedA), .control(ID_EX_aluSrcA), .out(aluIn1));//sign extend PC
+	alu                ALU(.in1(aluIn1), .in2(aluIn2b), .aluFunc(ID_EX_aluOP), .aluResult(aluResult));
+	mux16b             alusrcA(.in1({{8{ID_EX_PC[7]}}, ID_EX_PC}) , .in2(forwardedA), .control(ID_EX_aluSrcA), .out(aluIn1));//sign extend PC
 	//If aluSrcB is immediate, use the immediate. It should stay imm5 or RFread2 UNLESS aluSrcA (Ld or Store instruction) is low.
-	mux16b		alusrcB1(.in1(aluIn2a), .in2(forwardedB), .control(ID_EX_aluSrcB), .out(aluIn2b));
-	mux16b		alusrcB2(.in1(ID_EX_sext9[15:0]), .in2(ID_EX_sext5[15:0]), .control(ID_EX_immType), .out(aluIn2a));
+	mux16b             alusrcB1(.in1(aluIn2a), .in2(forwardedB), .control(ID_EX_aluSrcB), .out(aluIn2b));
+	mux16b             alusrcB2(.in1(ID_EX_sext9[15:0]), .in2(ID_EX_sext5[15:0]), .control(ID_EX_immType), .out(aluIn2a));
 	//If compOrLoad is zero, use data from memory, otherwise use the alu result, MEM_WB_dataToWriteback is the data which will be written into the regFile
-	mux16b 		wb_data_sel(.in1(MEM_WB_dataFromMem), .in2(MEM_WB_aluResult), .control(MEM_WB_compOrLoad), .out(wb_mux_out)); 
+	mux16b             wb_data_sel(.in1(ramData_in), .in2(MEM_WB_aluResult), .control(whichcompOrLoad), .out(wb_mux_out)); 
 	//Need a mux that chooses what address to use for writing to/ from memory
-	mux16b 		mem_addr(.in1(EX_MEM_aluResult), .in2(EX_MEM_RFread2), .control(EX_MEM_regAddressing), .out(ramAddress));
-	branchController bc1(
-		.aluOp(ID_EX_aluOP),		//
-		.inputData(ID_EX_RFread1), 	//data from regFile
-		.pcSel(pcSel),				//PC select bits
-		.branchTaken(branchTaken)	//is branch taken?
-	);
-	controller 	c1(
-		.IF_ID_Inst(IF_ID_Inst), .isBranch(isBranch), .isJump(isJump), 
-		.aluSrcA(aluSrcA),.aluSrcB(aluSrcB), 
-		.dataMemRead(dataMemRead), .dataMemWrite(dataMemWrite), 
-		.regWrite(regWrite), 
-		.compOrLoad(compOrLoad),.immType(immType), .regAddressing(regAddressing),
-		.aluOP(aluOP),.RFwriteAddress(RFwriteAddress), .isLoad(isLoad)
-	);
-	regReadDec rrd1(
-	.IF_ID_Inst(IF_ID_Inst), .RFreadReg1(RFreadReg1), .RFreadReg2(RFreadReg2)
-	);
+	mux16b             mem_addr(.in1(EX_MEM_aluResult), .in2(EX_MEM_RFread2), .control(EX_MEM_regAddressing), .out(to_ramAddress));
+	mux1b              whichcomporLoad(.a(MEM_WB_compOrLoad), .b(prev_MEM2_WB_compOrLoad), .sel(MEM_WB_isLoad), .y(whichcompOrLoad));
+	branchController   bc1(
+                                .aluOp(ID_EX_aluOP),		//
+                                .inputData(ID_EX_RFread1), 	//data from regFile
+                                .pcSel(pcSel),				//PC select bits
+                                .branchTaken(branchTaken)	//is branch taken?
+	                       );
+	controller         c1(
+                                .IF_ID_Inst(IF_ID_Inst), .isBranch(isBranch), .isJump(isJump), 
+                                .aluSrcA(aluSrcA),.aluSrcB(aluSrcB), 
+                                .dataMemRead(dataMemRead), .dataMemWrite(dataMemWrite), 
+                                .regWrite(regWrite), 
+                                .compOrLoad(compOrLoad),.immType(immType), .regAddressing(regAddressing),
+                                .aluOP(aluOP),.RFwriteAddress(RFwriteAddress), .isLoad(isLoad)
+                            );
+	regReadDec         rrd1(
+                                .IF_ID_Inst(IF_ID_Inst), .RFreadReg1(RFreadReg1), .RFreadReg2(RFreadReg2)
+                            );
 	hazardDetector h1(
-		.instruction(IF_ID_Inst), 
-		.ID_EX_RFWriteAddress(ID_EX_RFwriteAddress),
-		.EX_MEM_RFWriteAddress(EX_MEM_RFwriteAddress), 
-		.MEM2_WB_RFWriteAddress(MEM2_WB_RFwriteAddress),
-		.MEM_WB_RFWriteAddress(MEM_WB_RFwriteAddress),
-		.ID_EX_regWrite(ID_EX_regWrite),
-		.EX_MEM_regWrite(EX_MEM_regWrite), 
-		.MEM2_WB_regWrite(MEM2_WB_regWrite),
-		.MEM_WB_regWrite(MEM_WB_regWrite),
-		.EX_MEM_isLoad(EX_MEM_isLoad),
-		.stall(executeStall),
-		.newWriteIncoming(newWriteIncoming),
-		.forwardA(forwardA),
-		.forwardB(forwardB)
+                                .instruction(IF_ID_Inst), 
+                                .ID_EX_RFWriteAddress(ID_EX_RFwriteAddress),
+                                .EX_MEM_RFWriteAddress(EX_MEM_RFwriteAddress), 
+                                .MEM2_WB_RFWriteAddress(MEM2_WB_RFwriteAddress),
+                                .MEM_WB_RFWriteAddress(MEM_WB_RFwriteAddress),
+                                .ID_EX_regWrite(ID_EX_regWrite),
+                                .EX_MEM_regWrite(EX_MEM_regWrite), 
+                                .MEM2_WB_regWrite(MEM2_WB_regWrite),
+                                .MEM_WB_regWrite(MEM_WB_regWrite),
+                                .ID_EX_isLoad(ID_EX_isLoad),
+                                .stall(executeStall),
+                                .newWriteIncoming(newWriteIncoming),
+                                .forwardA(forwardA),
+                                .forwardB(forwardB)
 	);
 	
 	//Hazard Detection
 	//Any data read from readData1 should be directly wired as outgoingData, only will be written out there if WE is high
 	//Because you have a deep processor, you need write suppression logic
 	//Write-After-Write hazard 
-	
-	assign instrReadM = 1'b1;
-    assign instrAddress = PC;
-	assign ramData_out = EX_MEM_dataOut;
-	assign ramReadM = EX_MEM_dataMemRead;
-	assign ramWriteM = EX_MEM_dataMemWrite;
-	assign loading_data = ID_EX_dataMemRead; // if instruction is a load, add a 1 cycle penalty
-	assign final_regWrite = MEM_WB_regWrite && !newWriteIncoming; //Final write enable signal for MEM_WB stage, check if new instructions going to same register
+	assign noCommandLeft   = (ID_EX_aluOP == `NOP && EX_MEM_aluOP == `NOP && MEM2_WB_aluOP == `NOP && MEM_WB_aluOP == `NOP && internalPC > 8'd4);
+	assign instrReadM      = 1'b1;
+	assign ramAddress      = EX_MEM_ramAddress;
+    assign instrAddress    = PC;
+	assign ramData_out     = EX_MEM_dataOut;
+	assign ramReadM        = EX_MEM_dataMemRead;
+	assign ramWriteM       = EX_MEM_dataMemWrite;
+	assign loading_data    = ID_EX_dataMemRead; // if instruction is a load, add a 1 cycle penalty
+	assign final_regWrite  = MEM_WB_regWrite && !newWriteIncoming; //Final write enable signal for MEM_WB stage, check if new instructions going to same register
 	
 	//Reset Protocol
 	always @(posedge clock) begin
 		if(reset) begin
 			PC <= 0;
+			internalPC               <= 8'b0;
+			
 
         // Flush IF/ID stage
-			IF2_Inst <= 16'b0;
-			IF2_PC <= 8'b0;
-			IF2_nextPC <= 8'b0;
+			IF2_Inst                 <= 16'b0;
+			IF2_PC                   <= 8'b0;
+			IF2_nextPC               <= 8'b0;
 		
-            IF_ID_Inst <= 16'b0;
-            IF_ID_PC <= 8'b0;
-            IF_ID_nextPC <= 8'b0;
+            IF_ID_Inst               <= 16'b0;
+            IF_ID_PC                 <= 8'b0;
+            IF_ID_nextPC             <= 8'b0;
     
             // Flush ID/EX stage
-            ID_EX_RFread1 <= 16'b0;
-            ID_EX_RFread2 <= 16'b0;
-            ID_EX_sext5 <= 16'b0;
-            ID_EX_sext9 <= 16'b0;
-            ID_EX_PC <= 8'b0;
-            ID_EX_nextPC <= 8'b0;
-            ID_EX_RFwriteAddress <= 3'b0;
-            ID_EX_isBranch <= 0;
-            ID_EX_isJump <= 0;
-            ID_EX_aluSrcA <= 0;
-            ID_EX_aluSrcB <= 0;
-            ID_EX_dataMemRead <= 0;
-            ID_EX_dataMemWrite <= 0;
-            ID_EX_regWrite <= 0;
-            ID_EX_compOrLoad <= 0;
-            ID_EX_aluOP <= 4'b0;
-            ID_EX_immType <= 0;
-			ID_EX_regAddressing <= 0;
+            ID_EX_RFread1            <= 16'b0;
+            ID_EX_RFread2            <= 16'b0;
+            ID_EX_sext5              <= 16'b0;
+            ID_EX_sext9              <= 16'b0;
+            ID_EX_PC                 <= 8'b0;
+            ID_EX_nextPC             <= 8'b0;
+            ID_EX_RFwriteAddress     <= 3'b0;
+            ID_EX_isBranch           <= 0;
+            ID_EX_isJump             <= 0;
+            ID_EX_aluSrcA            <= 0;
+            ID_EX_aluSrcB            <= 0;
+            ID_EX_dataMemRead        <= 0;
+            ID_EX_dataMemWrite       <= 0;
+            ID_EX_regWrite           <= 0;
+            ID_EX_compOrLoad         <= 0;
+            ID_EX_aluOP              <= 4'b0;
+            ID_EX_immType            <= 0;
+			ID_EX_regAddressing      <= 0;
     
             // Similarly clear EX/MEM and MEM/WB...
             // EX/MEM stage
-            EX_MEM_aluResult <= 16'b0;
-            EX_MEM_dataOut <= 16'b0;
-            EX_MEM_PC <= 8'b0;
-            EX_MEM_nextPC <= 8'b0;
-            EX_MEM_RFwriteAddress <= 3'b0;
-            EX_MEM_dataMemRead <= 0;
-            EX_MEM_dataMemWrite <= 0;
-            EX_MEM_regWrite <= 0;
-            EX_MEM_compOrLoad <= 0;
-			EX_MEM_regAddressing <= 0;
-			EX_MEM_RFread2 <= 0;
-			EX_MEM_dataFromMem <= 16'b0;
+            EX_MEM_aluResult         <= 16'b0;
+            EX_MEM_dataOut           <= 16'b0;
+            EX_MEM_PC                <= 8'b0;
+            EX_MEM_nextPC            <= 8'b0;
+            EX_MEM_RFwriteAddress    <= 3'b0;
+            EX_MEM_dataMemRead       <= 0;
+            EX_MEM_dataMemWrite      <= 0;
+            EX_MEM_regWrite          <= 0;
+            EX_MEM_compOrLoad        <= 0;
+			EX_MEM_regAddressing     <= 0;
+			EX_MEM_RFread2           <= 0;
+            EX_MEM_dataFromMem       <= 16'b0;
     
             // MEM/WB stage
-            MEM_WB_aluResult <= 16'b0;
-            MEM_WB_dataFromMem <= 16'b0;
-            MEM_WB_RFwriteAddress <= 3'b0;
-            MEM_WB_regWrite <= 0;
-            MEM_WB_compOrLoad <= 0;
-            MEM_WB_dataToWriteback <= 16'b0;
+            MEM_WB_aluResult         <= 16'b0;
+            MEM_WB_dataFromMem       <= 16'b0;
+            MEM_WB_RFwriteAddress    <= 3'b0;
+            MEM_WB_regWrite          <= 0;
+            MEM_WB_compOrLoad        <= 0;
+            MEM_WB_dataToWriteback   <= 16'b0;
 			
 		end else if (branchTaken) begin
 			//Flush
 			//Insert NOP and FLUSH
-			IF_ID_Inst <= `NOP;
-			ID_EX_RFwriteAddress <= 3'b0;
-			ID_EX_regWrite <= 1'b0;
-			ID_EX_dataMemRead <= 1'b0;
-			ID_EX_dataMemWrite <= 1'b0;
-			ID_EX_aluOP <= `NOP;
-			PC <= pcSrc; //New Mux
+			IF_ID_Inst               <= `NOP;
+			ID_EX_RFwriteAddress     <= 3'b0;
+			ID_EX_regWrite           <= 1'b0;
+			ID_EX_dataMemRead        <= 1'b0;
+			ID_EX_dataMemWrite       <= 1'b0;
+			ID_EX_aluOP              <= `NOP;
+			PC                       <= pcSrc; //New Mux
 		
 		
 		
 		end else if(!executeStall)begin
-            PC <= pcSrc;
-			IF2_PC <= PC;
-			IF2_nextPC <= nextPC;
-			IF2_Inst <= instrData_in;
+            internalPC               <= internalPC + 1;
+            PC                       <= pcSrc;
+			IF2_PC                   <= PC;
+			IF2_nextPC               <= nextPC;
+			
+			
+			if(internalPC) begin
+            IF2_Inst                 <= instrData_in;
 			//if2 stage
-			IF_ID_PC <= IF2_PC;
-			IF_ID_nextPC <= IF2_nextPC;
-			IF_ID_Inst <= IF2_Inst;
+			IF_ID_PC                 <= PC;
+			IF_ID_nextPC             <= nextPC;
+			IF_ID_Inst               <= instrData_in;
+			
+			end
 		
 		end if (executeStall) begin
-			PC <= PC; //hold pc, stall the fetch
+			PC                       <= PC; //hold pc, stall the fetch
 			
 			IF2_PC <= IF2_PC;
 			IF2_nextPC <= IF2_nextPC;
@@ -323,6 +343,8 @@ module cpuStructSim(
 			ID_EX_immType 			<= immType;
 			ID_EX_regAddressing		<= regAddressing;
 			ID_EX_isLoad 			<= isLoad;
+			ID_EX_forwardA          <= forwardA;
+			ID_EX_forwardB          <= forwardB;
             stallInserted           <= 1'b0;
 
 		end	
@@ -339,6 +361,8 @@ module cpuStructSim(
 			EX_MEM_regAddressing	<= ID_EX_regAddressing;
 			EX_MEM_RFread2 			<= ID_EX_RFread2;
 			EX_MEM_isLoad 			<= ID_EX_isLoad;
+			EX_MEM_ramAddress       <= to_ramAddress;
+			EX_MEM_aluOP            <= ID_EX_aluOP;
 //			EX_MEM_dataFromMem      <= ramData_in;
 
 			//Mem2 to WB JUST FOR STORE
@@ -348,17 +372,23 @@ module cpuStructSim(
 			MEM2_WB_regWrite 		<= EX_MEM_regWrite;
 			MEM2_WB_compOrLoad 		<= EX_MEM_compOrLoad;
 			MEM2_WB_PC 				<= EX_MEM_PC;
-			
+            MEM2_WB_aluOP           <= EX_MEM_aluOP;
+            MEM2_WB_isLoad          <= EX_MEM_isLoad;
+            			
 			//MEM WB
 			MEM_WB_aluResult 		<= 	MEM2_WB_aluResult;
 			MEM_WB_dataFromMem 		<= 	MEM2_WB_dataFromMem; //used to be EX_MEM_dataFromMem
 			MEM_WB_RFwriteAddress 	<= 	MEM2_WB_RFwriteAddress;
 			MEM_WB_regWrite 		<=	MEM2_WB_regWrite;
 			MEM_WB_compOrLoad 		<= 	MEM2_WB_compOrLoad;
-			MEM_WB_dataToWriteback    <= wb_mux_out;
+			MEM_WB_dataToWriteback  <= wb_mux_out;
 			MEM_WB_PC				<= MEM2_WB_PC;
+			MEM_WB_isLoad           <= MEM2_WB_isLoad;
+			prev_MEM2_WB_compOrLoad <= MEM_WB_compOrLoad;
+			MEM_WB_aluOP            <= EX_MEM_aluOP;
 	end
 	
+
 	
  
 endmodule
