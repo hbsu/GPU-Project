@@ -45,6 +45,7 @@ module cpuTB(
 	assign romAddress = bootloadStatus ? bootloadAddress : pcROMaddress;
 	assign romDataIn = bootloadStatus ? bootloadIn : pcROMin; 
 	assign romWE = bootloadStatus | pcromWE;
+	wire stopIndicator;
 	
 	initial clock = 0;
 	always #5 clock = ~clock; //100 mhz clock
@@ -64,7 +65,9 @@ module cpuTB(
 		.ramReadM(ramRE), //read local memory
 		.ramWriteM(pcramWE), //write to local memory
 		.ramAddress(pcRAMaddress), //address in ram/local memory
-		.ramData_out(pcRAMin) //data to output to local memory
+		.ramData_out(pcRAMin), //data to output to local memory
+		
+		.noCommandLeft(stopIndicator)
 	);
 	
 	instruction_rom irom( //memory of instructions
@@ -98,8 +101,40 @@ module cpuTB(
 		
 		//PUT TESTBENCH STARTING THIS LINE:
 
-// Enter assembly lines (type END to finish):
-//ADD R1, R1, #1
+////ADD R1, R1, #10;
+// bootloadAddress = 8'h00;
+//bootloadIn = 16'b0001000100101010; // ADD R1, R1, #1;
+//#10;
+
+////ADD R2, R2, #5
+// bootloadAddress = 8'h01;
+//bootloadIn = 16'b0001001001000101; // ADD R2, R2, #1
+//#10;
+
+////STR R2, R1
+// bootloadAddress = 8'h02;
+//bootloadIn = 16'b1000010001000000; // STR R2, R1
+//#10;
+
+////ST R2, R1, #5
+// bootloadAddress = 8'h03;
+//bootloadIn = 16'b0110010000000101;// ST R2, R1, #5
+//#10;
+
+////ADD, R3, R3 #8
+// // Unknown instruction: ADD, R3, R3 #8
+////ADD R3, R3, #8
+// bootloadAddress = 8'h05;
+//bootloadIn = 16'b0001001101101000; // ADD R3, R3, #8
+//#10;
+
+////LDR R4, R3
+// bootloadAddress = 8'h06;
+//bootloadIn = 16'b1001100011000000; // LDR R4, R3
+//#10;
+
+//
+
 //ADD R1, R1, #1
  bootloadAddress = 8'h00;
 bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
@@ -135,28 +170,18 @@ bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
 bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
 #10;
 
-//ADD R1, R1, #1
- bootloadAddress = 8'h07;
-bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
-#10;
-
-//ADD R1, R1, #1
- bootloadAddress = 8'h08;
-bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
-#10;
-
-//ADD R1, R1, #1
- bootloadAddress = 8'h09;
-bootloadIn = 16'b0001000100100001; // ADD R1, R1, #1
-#10;
+//
 		//*****DO NOT REMOVE BELOW THIS LINE
 		bootloadStatus = 0;
-		#30;
+		#35;
         reset = 0;
 		//*****DO NOT REMOVE ABOVE THIS LINE
 
+        while(stopIndicator != 1'b1) begin
+            #10;
+        end
         
-        #100; //Allow time for commmands to pass. 
+        #10; //Allow time for commmands to pass. 
             //Each instruction takes at most 7 clock cycles,
             //so Run the testbench for #(70 * instruction count)      
 	
