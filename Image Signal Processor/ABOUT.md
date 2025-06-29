@@ -13,4 +13,8 @@
   <p>
     The rest wasn't as hard, I just wanted to implement many structural multiplication and shifting modules, and emulate matrix multiplication because I know that many neural networks need that hardware to work. I wanted to be able to target these applications if I ever did a fpga project based on this.
   </p>
+
+the isp_pipeline module contains a call for each of the pipeline stages. All of the blc_c_N modules can be found in blc_c.v, and same with the rest. 
+
+  
 </div>
